@@ -13,7 +13,7 @@ import plotly.express as px
 from model import prediction
 from sklearn.svm import SVR
 
-app = dash.Dash(__name__, external_stylesheets=['assets\styles.css'])
+app = dash.Dash(__name__, external_stylesheets=['assets/styles.css'])
 server = app.server
 
 # Define the layout components
@@ -87,6 +87,9 @@ app.layout = html.Div(className='container', children=[item1, item2])
     [State("stock-code", "value")]
 )
 def update_data(n, val):
+
+    val = val.strip() if val else None
+
     if n is None:
         return None, None, None, None, None, None
     else:
@@ -115,20 +118,35 @@ def update_data(n, val):
     [State("stock-code", "value")]
 )
 def stock_price(n, start_date, end_date, val):
-    if n is None:
+    if n is None or val is None:
         return [""]
-    if val is None:
-        raise PreventUpdate
-    else:
-        if start_date is not None:
-            df = yf.download(val, str(start_date), str(end_date))
-        else:
-            df = yf.download(val)
+
+    # Ensure start_date and end_date are provided
+    if start_date is None or end_date is None:
+        return ["Please select a valid date range."]
+
+    # Download the data for the specified date range
+    df = yf.download(val, start=start_date, end=end_date)
+
+    if df.empty:
+        return ["No data available for the selected date range."]
 
     df.reset_index(inplace=True)
-    fig = px.line(df, x="Date", y=["Close", "Open"], title="Closing and Opening Price vs Date")
-    return [dcc.Graph(figure=fig)]
 
+    # Ensure 'Close' and 'Open' columns are 1D
+    close_prices = df['Close'].values.flatten()  # Convert to 1D
+    open_prices = df['Open'].values.flatten()    # Convert to 1D
+    dates = df['Date']
+
+    fig = px.line(x=dates, y=[close_prices, open_prices], 
+                   labels={'x': 'Date', 'y': 'Price'}, 
+                   title="Closing and Opening Price vs Date",
+                   template='plotly')
+    
+    fig.update_traces(name='Close', selector=dict(name='Close'))
+    fig.add_scatter(x=dates, y=open_prices, mode='lines', name='Open')
+
+    return [dcc.Graph(figure=fig)]
 
 # Callback for displaying indicators
 @app.callback(
@@ -141,14 +159,16 @@ def stock_price(n, start_date, end_date, val):
     [State("stock-code", "value")]
 )
 def indicators(n, start_date, end_date, val):
-    if n is None:
+    if n is None or val is None:
         return [""]
-    if val is None:
-        return [""]
-    if start_date is None:
-        df_more = yf.download(val)
-    else:
-        df_more = yf.download(val, str(start_date), str(end_date))
+
+    if start_date is None or end_date is None:
+        return ["Please select a valid date range."]
+
+    df_more = yf.download(val, start=start_date, end=end_date)
+
+    if df_more.empty:
+        return ["No data available for the selected date range."]
 
     df_more.reset_index(inplace=True)
     fig = get_more(df_more)
@@ -161,21 +181,26 @@ def get_more(df):
     fig.update_traces(mode='lines+markers')
     return fig
 
-
 # Callback for displaying forecast
 @app.callback(
-    [Output("forecast-content", "children")],
+    Output("forecast-content", "children"),
     [Input("forecast-button", "n_clicks")],
     [State("forecast-days", "value"),
      State("stock-code", "value")]
 )
 def forecast(n, n_days, val):
-    if n is None:
+    if n is None or val is None:
         return [""]
-    if val is None:
-        raise PreventUpdate
-    fig = prediction(val, int(n_days) + 1)
-    return [dcc.Graph(figure=fig)]
+
+    if n_days is None or n_days <= 0:
+        return [html.Div("Please enter a valid number of days for forecasting.")]
+
+    try:
+        
+        fig = prediction(val, int(n_days) + 1) 
+        return [dcc.Graph(figure=fig)]
+    except ValueError as e:
+        return [html.Div(str(e))]
 
 
 if __name__ == '__main__':
